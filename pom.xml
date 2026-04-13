@@ -1,0 +1,13 @@
+<project>
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.seunome</groupId>
+    <artifactId>whatsapp-clone</artifactId>
+    <version>1.0</version>
+    <packaging>pom</packaging>
+
+    <modules>
+        <module>Server</module>
+        <module>Client</module>
+        <module>Shared</module>
+    </modules>
+</project>

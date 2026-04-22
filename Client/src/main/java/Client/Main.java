@@ -5,7 +5,10 @@ import com.seunome.Packet;
 
 import java.io.*;
 import java.net.Socket;
+import java.util.Queue;
 import java.util.Scanner;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class Main {
 
@@ -18,17 +21,21 @@ public class Main {
         PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
         BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
         Scanner scanner = new Scanner(System.in);
-
+        Queue<String> pendingAckIds = new ConcurrentLinkedQueue<>();
         new Thread(() -> {
             try {
                 String line;
                 while ((line = in.readLine()) != null) {
                     Packet p = gson.fromJson(line, Packet.class);
-
+                    //mudança
                     switch (p.getType()) {
-                        case MESSAGE -> System.out.println("\n[" + p.getFrom() + "]: " + p.getContent());
+                        case MESSAGE -> {
+                            System.out.println("\n[" + p.getFrom() + "]: " + p.getContent());
+                            System.out.println("(pressione Enter para marcar como lida)");
+                            pendingAckIds.add(p.getMessageId());
+                        }
 
-                        case ACK_DELIVERED -> System.out.println("✓✓ Entregue - mensagem " + p.getMessageId());
+                        case ACK_DELIVERED -> System.out.println("✓ Entregue - mensagem " + p.getMessageId());
 
                         case ACK_READ -> System.out.println("✓✓ Lida - mensagem " + p.getMessageId());
 
@@ -59,9 +66,17 @@ public class Main {
         out.println(gson.toJson(register));
 
         System.out.println("Registrado! Digite 'telefone:mensagem' para enviar:");
-
+        //Mudança
         // Loop de envio
         while (scanner.hasNextLine()) {
+            String pendingId;
+            while ((pendingId = pendingAckIds.poll()) != null) {
+                Packet ack = new Packet();
+                ack.setType(Packet.Type.ACK_READ);
+                ack.setMessageId(pendingId);
+                out.println(gson.toJson(ack));
+            }
+
             String input = scanner.nextLine();
 
             if (input.startsWith("hist:")) {

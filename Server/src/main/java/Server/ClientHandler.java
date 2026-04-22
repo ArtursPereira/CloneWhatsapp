@@ -68,6 +68,7 @@ public class ClientHandler implements Runnable {
         ServerMain.onlineUsers.put(phone, out); // Loga o amigo
         System.out.println("Usuário registrado: " + phone); // envia uma mensagem avisando que o amigo está online
         deliverPendingMessages(); // Entrega mensagens pendentes
+        notifyPendingReadAcks();
     }
     //TODO alterar a lógica de envio para funcionar corretamente,
     // os status de lido, entregue e enviada não estão corretos
@@ -122,8 +123,6 @@ public class ClientHandler implements Runnable {
             em.getTransaction().begin();
             msg.setStatus(MessageStatus.LIDA);
             em.getTransaction().commit();
-            //TODO: Concertar essa função pra retornar lida quando o amigo se reconectar
-            // Notifica remetente que foi lida (Não funciona)
             PrintWriter senderOut = ServerMain.onlineUsers.get(msg.getSender().getPhone());
             if (senderOut != null) {
                 Packet ack = new Packet();
@@ -167,10 +166,26 @@ public class ClientHandler implements Runnable {
         em.close();
     }
 
-    /*
-    TODO criar a função para enviar o histórico entre dois usuários,
-    Ideia inical é pegar o número de quem solicitou o histórico
-     e pedir o número do outro usuário que ele deseja*/
+    private void notifyPendingReadAcks() {
+        EntityManager em = DatabaseManager.getEntityManager();
+
+        List<Message> readMsgs = em.createQuery("SELECT m FROM Message m WHERE m.sender.phone = :phone AND m.status = :status",
+                Message.class)
+                .setParameter("phone", phone)
+                .setParameter("status", MessageStatus.LIDA)
+                .getResultList();
+
+        for (Message msg : readMsgs) {
+            Packet ack = new Packet();
+            ack.setType(Packet.Type.ACK_READ);
+            ack.setMessageId(String.valueOf(msg.getId()));
+            ack.setStatus("LIDA");
+            out.println(ServerMain.gson.toJson(ack));
+        }
+        em.close();
+    }
+
+
 
     private void handleHistoryRequest(Packet packet) {
         EntityManager em = DatabaseManager.getEntityManager();
@@ -195,6 +210,7 @@ public class ClientHandler implements Runnable {
             out.println(ServerMain.gson.toJson(p));
 
         }
+        em.close();
     }
 
 }

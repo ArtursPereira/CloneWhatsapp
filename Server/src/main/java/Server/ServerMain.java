@@ -15,15 +15,15 @@ public class ServerMain {
             = new ConcurrentHashMap<>();
 
     public static void main(String[] args) throws IOException {
-        ExecutorService pool = Executors.newCachedThreadPool();
-        ServerSocket serverSocket = new ServerSocket(PORT);
+        ExecutorService pool = Executors.newCachedThreadPool();// Verifica se tem alguma thread disponivel, se n tiver cria outra
+        ServerSocket serverSocket = new ServerSocket(PORT); // Cria um socket para o client
 
         System.out.println("Servidor rodando na porta " + PORT);
 
         while (true) {
             Socket clientSocket = serverSocket.accept(); // espera um cliente conectar
             System.out.println("Novo cliente conectado: " + clientSocket.getInetAddress());
-            pool.submit(new ClientHandler(clientSocket)); // cria thread para ele
+            pool.submit(new ClientHandler(clientSocket)); // avança a fila, para esperar outra conexão de client
         }
     }
 }

@@ -4,8 +4,6 @@ import Entity.*;
 import com.google.gson.Gson;
 import com.seunome.Packet;
 import jakarta.persistence.*;
-import org.postgresql.shaded.com.ongres.scram.common.bouncycastle.pbkdf2.Pack;
-
 import java.io.*;
 import java.net.Socket;
 import java.time.LocalDateTime;
@@ -15,7 +13,7 @@ public class ClientHandler implements Runnable {
 
     private final Socket socket;
     private PrintWriter out;
-    private String phone; // telefone do cliente desta thread
+    private String phone;
 
     public ClientHandler(Socket socket) {
         this.socket = socket;
@@ -37,7 +35,6 @@ public class ClientHandler implements Runnable {
         } catch (IOException e) {
             System.out.println("Cliente desconectado: " + phone);
         } finally {
-            // Remove do mapa ao desconectar
             if (phone != null) ServerMain.onlineUsers.remove(phone);
             try { socket.close(); } catch (IOException ignored) {}
         }
@@ -45,37 +42,62 @@ public class ClientHandler implements Runnable {
 
     private void handlePacket(Packet packet) {
         switch (packet.getType()) {
-            case REGISTER   -> handleRegister(packet);
-            case LOGIN      -> handleLogin(packet);
-            case MESSAGE    -> handleMessage(packet);
-            case ACK_READ   -> handleAckRead(packet);
-            default         -> System.out.println("Tipo desconhecido: " + packet.getType());
+            case REGISTER        -> handleRegister(packet);
+            case LOGIN           -> handleLogin(packet);
+            case MESSAGE         -> handleMessage(packet);
+            case ACK_READ        -> handleAckRead(packet);
+            case HISTORY_REQUEST -> handleHistoryRequest(packet);
+            default -> System.out.println("Tipo desconhecido: " + packet.getType());
         }
     }
 
     private void handleRegister(Packet packet) {
-        this.phone = packet.getFrom();
+        String requestedPhone = packet.getFrom();
         EntityManager em = DatabaseManager.getEntityManager();
-        User existing = em.find(User.class, phone);
+        User existing = em.find(User.class, requestedPhone);
+
+        Packet response = new Packet();
+        response.setType(Packet.Type.REGISTER);
+
         if (existing == null) {
             em.getTransaction().begin();
-            em.persist(new User(phone, packet.getName(), packet.getNickname(), packet.getPassword()));
+            em.persist(new User(requestedPhone, packet.getName(), packet.getNickname(), packet.getPassword()));
             em.getTransaction().commit();
-            Packet client;
-            client
+
+            this.phone = requestedPhone;
             ServerMain.onlineUsers.put(phone, out);
-            System.out.println("Usuário registrado: " + phone + client.getType());
-        }else{
+            response.setStatus("SUCESSO");
+            System.out.println("Usuário registrado: " + phone);
+        } else {
+            response.setStatus("FALHA");
             System.out.println("O registro falhou, você já tem conta no sistema.");
-            }
+        }
+
+        out.println(ServerMain.gson.toJson(response));
         em.close();
-        // Adiciona ao mapa de online
     }
 
     private void handleLogin(Packet packet) {
-        this.phone = packet.getFrom();
+        String requestedPhone = packet.getFrom();
         EntityManager em = DatabaseManager.getEntityManager();
-        deliverPendingMessages();
+        User user = em.find(User.class, requestedPhone);
+
+        Packet response = new Packet();
+        response.setType(Packet.Type.LOGIN);
+
+        if (user != null && user.getPassword().equals(packet.getPassword())) {
+            this.phone = requestedPhone;
+            ServerMain.onlineUsers.put(phone, out);
+            response.setStatus("SUCESSO");
+
+            deliverPendingMessages();
+            notifyPendingReadAcks();
+        } else {
+            response.setStatus("FALHA");
+        }
+
+        out.println(ServerMain.gson.toJson(response));
+        em.close();
     }
 
     private void handleMessage(Packet packet) {
@@ -84,26 +106,21 @@ public class ClientHandler implements Runnable {
         User sender   = em.find(User.class, packet.getFrom());
         User receiver = em.find(User.class, packet.getTo());
 
-        // Salva mensagem no banco como ENVIADA
         Message msg = new Message(sender, receiver, packet.getContent(), LocalDateTime.now());
         em.getTransaction().begin();
         em.persist(msg);
         em.getTransaction().commit();
 
-        // Tenta entregar se destinatário está online
         PrintWriter receiverOut = ServerMain.onlineUsers.get(packet.getTo());
         if (receiverOut != null) {
             packet.setMessageId(String.valueOf(msg.getId()));
             packet.setStatus("ENTREGUE");
             receiverOut.println(ServerMain.gson.toJson(packet));
 
-            // Verifica se o envio realmente funcionou
             if (receiverOut.checkError()) {
-                // Socket estava morto, remove do mapa e mantém como ENVIADA
                 ServerMain.onlineUsers.remove(packet.getTo());
                 System.out.println("Destinatário desconectado, mensagem ficará como ENVIADA");
             } else {
-                // Entregou de verdade
                 em.getTransaction().begin();
                 msg.setStatus(MessageStatus.ENTREGUE);
                 em.getTransaction().commit();
@@ -129,7 +146,6 @@ public class ClientHandler implements Runnable {
             msg.setStatus(MessageStatus.LIDA);
             em.getTransaction().commit();
 
-            // Notifica remetente que foi lida
             PrintWriter senderOut = ServerMain.onlineUsers.get(msg.getSender().getPhone());
             if (senderOut != null) {
                 Packet ack = new Packet();
@@ -155,20 +171,65 @@ public class ClientHandler implements Runnable {
         System.out.println("Pendentes para " + phone + ": " + pending.size());
 
         for (Message msg : pending) {
-            // 1. Envia o Packet pelo socket primeiro
             Packet p = new Packet();
             p.setType(Packet.Type.MESSAGE);
             p.setFrom(msg.getSender().getPhone());
+            p.setTo(msg.getReceiver().getPhone());
             p.setContent(msg.getContent());
             p.setMessageId(String.valueOf(msg.getId()));
             p.setStatus("ENTREGUE");
-            out.println(ServerMain.gson.toJson(p)); // ← envia pro cliente
+            out.println(ServerMain.gson.toJson(p));
 
-            // 2. Só então atualiza o status no banco
             em.getTransaction().begin();
             Message managed = em.find(Message.class, msg.getId());
             managed.setStatus(MessageStatus.ENTREGUE);
             em.getTransaction().commit();
+        }
+        em.close();
+    }
+
+    private void notifyPendingReadAcks() {
+        EntityManager em = DatabaseManager.getEntityManager();
+
+        List<Message> readMsgs = em.createQuery(
+                        "SELECT m FROM Message m WHERE m.sender.phone = :phone AND m.status = :status",
+                        Message.class)
+                .setParameter("phone", phone)
+                .setParameter("status", MessageStatus.LIDA)
+                .getResultList();
+
+        for (Message msg : readMsgs) {
+            Packet ack = new Packet();
+            ack.setType(Packet.Type.ACK_READ);
+            ack.setMessageId(String.valueOf(msg.getId()));
+            ack.setStatus("LIDA");
+            out.println(ServerMain.gson.toJson(ack));
+        }
+        em.close();
+    }
+
+    private void handleHistoryRequest(Packet packet) {
+        EntityManager em = DatabaseManager.getEntityManager();
+
+        List<Message> history = em.createQuery(
+                        "SELECT m FROM Message m WHERE " +
+                                "(m.sender.phone = :user1 AND m.receiver.phone = :user2) OR " +
+                                "(m.sender.phone = :user2 AND m.receiver.phone = :user1) " +
+                                "ORDER BY m.timestamp ASC",
+                        Message.class)
+                .setParameter("user1", phone)
+                .setParameter("user2", packet.getTo())
+                .getResultList();
+
+        for (Message message : history) {
+            Packet p = new Packet();
+            p.setType(Packet.Type.HISTORY_RESPONSE);
+            p.setFrom(message.getSender().getPhone());
+            p.setTo(message.getReceiver().getPhone());
+            p.setContent(message.getContent());
+            p.setMessageId(String.valueOf(message.getId()));
+            p.setStatus(message.getStatus().name());
+            out.println(ServerMain.gson.toJson(p));
         }
         em.close();
     }

@@ -5,7 +5,10 @@ import com.seunome.Packet;
 
 import java.io.*;
 import java.net.Socket;
+import java.util.Queue;
 import java.util.Scanner;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class Main {
 
@@ -15,29 +18,31 @@ public class Main {
 
     public static void main(String[] args) throws Exception {
         Socket socket = new Socket(HOST, PORT);
-        PrintWriter out   = new PrintWriter(socket.getOutputStream(), true);
+        PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
         BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-        Scanner scanner   = new Scanner(System.in);
-
-        // Thread para receber mensagens do servidor
+        Scanner scanner = new Scanner(System.in);
+        Queue<String> pendingAckIds = new ConcurrentLinkedQueue<>();
         new Thread(() -> {
             try {
                 String line;
                 while ((line = in.readLine()) != null) {
                     Packet p = gson.fromJson(line, Packet.class);
-
+                    //mudança
                     switch (p.getType()) {
-                        case MESSAGE ->
-                                System.out.println("\n[" + p.getFrom() + "]: " + p.getContent());
+                        case MESSAGE -> {
+                            System.out.println("\n[" + p.getFrom() + "]: " + p.getContent());
+                            System.out.println("(pressione Enter para marcar como lida)");
+                            pendingAckIds.add(p.getMessageId());
+                        }
 
-                        case ACK_DELIVERED ->
-                                System.out.println("✓✓ Entregue - mensagem " + p.getMessageId());
+                        case ACK_DELIVERED -> System.out.println("✓ Entregue - mensagem " + p.getMessageId());
 
-                        case ACK_READ ->
-                                System.out.println("✓✓ Lida - mensagem " + p.getMessageId());
+                        case ACK_READ -> System.out.println("✓✓ Lida - mensagem " + p.getMessageId());
 
-                        default ->
-                                System.out.println("Pacote recebido: " + p.getType());
+                        case HISTORY_RESPONSE -> System.out.println("[" + p.getFrom() + " → " + p.getTo() + "]: "
+                                + p.getContent() + " (" + p.getStatus() + ")");
+
+                        default -> System.out.println("Pacote recebido: " + p.getType());
                     }
                 }
             } catch (IOException e) {
@@ -46,8 +51,6 @@ public class Main {
         }).start();
 
         // Registro
-
-
         System.out.print("Telefone: ");
         String phone = scanner.nextLine();
         System.out.print("Nome: ");
@@ -63,20 +66,40 @@ public class Main {
         out.println(gson.toJson(register));
 
         System.out.println("Registrado! Digite 'telefone:mensagem' para enviar:");
-
+        //Mudança
         // Loop de envio
         while (scanner.hasNextLine()) {
+            String pendingId;
+            while ((pendingId = pendingAckIds.poll()) != null) {
+                Packet ack = new Packet();
+                ack.setType(Packet.Type.ACK_READ);
+                ack.setMessageId(pendingId);
+                out.println(gson.toJson(ack));
+            }
+
             String input = scanner.nextLine();
-            String[] parts = input.split(":", 2);
-            if (parts.length == 2) {
-                Packet msg = new Packet();
-                msg.setType(Packet.Type.MESSAGE);
-                msg.setFrom(phone);
-                msg.setTo(parts[0]);
-                msg.setContent(parts[1]);
-                out.println(gson.toJson(msg));
+
+            if (input.startsWith("hist:")) {
+                // verifica hist: ANTES do split genérico
+                String target = input.split(":", 2)[1];
+                Packet hist = new Packet();
+                hist.setType(Packet.Type.HISTORY_REQUEST);
+                hist.setFrom(phone);
+                hist.setTo(target);
+                out.println(gson.toJson(hist));
+
             } else {
-                System.out.println("Formato: telefone:mensagem");
+                String[] parts = input.split(":", 2);
+                if (parts.length == 2) {
+                    Packet msg = new Packet();
+                    msg.setType(Packet.Type.MESSAGE);
+                    msg.setFrom(phone);
+                    msg.setTo(parts[0]);
+                    msg.setContent(parts[1]);
+                    out.println(gson.toJson(msg));
+                } else {
+                    System.out.println("Formato: telefone:mensagem ou hist:telefone");
+                }
             }
         }
     }

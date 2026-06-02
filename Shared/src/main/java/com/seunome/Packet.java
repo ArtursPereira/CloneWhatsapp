@@ -5,10 +5,15 @@ public class Packet {
     public enum Type {
         REGISTER,
         MESSAGE,
+        LOGIN,
         ACK_DELIVERED,
         ACK_READ,
         HISTORY_REQUEST,
-        HISTORY_RESPONSE
+        HISTORY_RESPONSE,
+        REGISTER_SUCCESS,
+        REGISTER_FAIL,
+        LOGIN_SUCCESS,
+        LOGIN_FAIL
     }
 
     private Type   type;
@@ -20,6 +25,7 @@ public class Packet {
     private String status;
     private String name;
     private String nickname;
+    private String password;
 
     public Packet() {}
 
@@ -32,6 +38,7 @@ public class Packet {
     public String getStatus()    { return status; }
     public String getName()      { return name; }
     public String getNickname()  { return nickname; }
+    public String getPassword() {return password;}
 
     public void setType(Type type)           { this.type = type; }
     public void setFrom(String from)         { this.from = from; }
@@ -42,4 +49,5 @@ public class Packet {
     public void setStatus(String status)     { this.status = status; }
     public void setName(String name)         { this.name = name; }
     public void setNickname(String nickname) { this.nickname = nickname; }
+    public void setPassword(String password) {this.password = password;}
 }

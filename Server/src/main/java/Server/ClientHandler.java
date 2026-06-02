@@ -4,6 +4,8 @@ import Entity.*;
 import com.google.gson.Gson;
 import com.seunome.Packet;
 import jakarta.persistence.*;
+import org.postgresql.shaded.com.ongres.scram.common.bouncycastle.pbkdf2.Pack;
+
 import java.io.*;
 import java.net.Socket;
 import java.time.LocalDateTime;
@@ -44,6 +46,7 @@ public class ClientHandler implements Runnable {
     private void handlePacket(Packet packet) {
         switch (packet.getType()) {
             case REGISTER   -> handleRegister(packet);
+            case LOGIN      -> handleLogin(packet);
             case MESSAGE    -> handleMessage(packet);
             case ACK_READ   -> handleAckRead(packet);
             default         -> System.out.println("Tipo desconhecido: " + packet.getType());
@@ -53,21 +56,25 @@ public class ClientHandler implements Runnable {
     private void handleRegister(Packet packet) {
         this.phone = packet.getFrom();
         EntityManager em = DatabaseManager.getEntityManager();
-
-        // Salva usuário se não existir
         User existing = em.find(User.class, phone);
         if (existing == null) {
             em.getTransaction().begin();
-            em.persist(new User(phone, packet.getName(), packet.getNickname()));
+            em.persist(new User(phone, packet.getName(), packet.getNickname(), packet.getPassword()));
             em.getTransaction().commit();
-        }
+            Packet client;
+            client
+            ServerMain.onlineUsers.put(phone, out);
+            System.out.println("Usuário registrado: " + phone + client.getType());
+        }else{
+            System.out.println("O registro falhou, você já tem conta no sistema.");
+            }
         em.close();
-
         // Adiciona ao mapa de online
-        ServerMain.onlineUsers.put(phone, out);
-        System.out.println("Usuário registrado: " + phone);
+    }
 
-        // Entrega mensagens pendentes
+    private void handleLogin(Packet packet) {
+        this.phone = packet.getFrom();
+        EntityManager em = DatabaseManager.getEntityManager();
         deliverPendingMessages();
     }
 

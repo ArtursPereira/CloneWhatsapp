@@ -46,6 +46,8 @@ public class Main {
         }).start();
 
         // Registro
+
+
         System.out.print("Telefone: ");
         String phone = scanner.nextLine();
         System.out.print("Nome: ");

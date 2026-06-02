@@ -16,11 +16,16 @@ public class User {
     @Column(name = "nickname")
     private String nickname;
 
+    @Column(name = "password", nullable = false )
+    private String password;
 
-    public User(String phone, String name, String nickname) {
+
+
+    public User(String phone, String name, String nickname, String password) {
         this.phone = phone;
         this.name = name;
         this.nickname = nickname;
+        this.password = password;
     }
 
     public User() {
@@ -48,5 +53,13 @@ public class User {
 
     public void setNickname(String nickname) {
         this.nickname = nickname;
+    }
+
+    public String getPassword() {
+        return password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
     }
 }

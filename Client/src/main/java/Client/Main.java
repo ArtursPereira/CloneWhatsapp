@@ -15,6 +15,7 @@ public class Main {
     private static final String HOST = "localhost";
     private static final int PORT = 5000;
     private static final Gson gson = new Gson();
+    private String  LoginorRegister;
 
     public static void main(String[] args) throws Exception {
         Socket socket = new Socket(HOST, PORT);
@@ -49,23 +50,49 @@ public class Main {
                 System.out.println("Desconectado do servidor.");
             }
         }).start();
+        System.out.println("Digite o comando:");
+        System.out.println("LOGIN");
+        System.out.println("REGISTER");
+        String comando = scanner.nextLine().toUpperCase();
+        String phone = null;
+        Packet packet = new Packet();
+        switch (comando) {
 
-        // Registro
-        System.out.print("Telefone: ");
-        String phone = scanner.nextLine();
-        System.out.print("Nome: ");
-        String name = scanner.nextLine();
-        System.out.print("Apelido: ");
-        String nickname = scanner.nextLine();
 
-        Packet register = new Packet();
-        register.setType(Packet.Type.REGISTER);
-        register.setFrom(phone);
-        register.setName(name);
-        register.setNickname(nickname);
-        out.println(gson.toJson(register));
+            case "LOGIN" ->{
+                System.out.print("Telefone: ");
+                phone = scanner.nextLine();
+                System.out.print("Password: ");
+                String password = scanner.nextLine();
+                packet.setType(Packet.Type.LOGIN);
+                packet.setFrom(phone);
+                packet.setPassword(password);
+                out.println(gson.toJson(packet));
+            }
+            case "REGISTER" -> {
+                System.out.print("Telefone: ");
 
-        System.out.println("Registrado! Digite 'telefone:mensagem' para enviar:");
+                phone = scanner.nextLine();
+                System.out.print("Nome: ");
+                String name = scanner.nextLine();
+                System.out.print("Apelido: ");
+                String nickname = scanner.nextLine();
+                System.out.print("Password: ");
+                String password = scanner.nextLine();
+
+                packet.setType(Packet.Type.REGISTER);
+                packet.setFrom(phone);
+                packet.setName(name);
+                packet.setNickname(nickname);
+                packet.setPassword(password);
+                out.println(gson.toJson(packet));
+                }
+                default -> {
+                    System.out.println("Comando inválido.");
+                    return;
+                }
+
+        }
         //Mudança
         // Loop de envio
         while (scanner.hasNextLine()) {

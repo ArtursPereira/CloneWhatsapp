@@ -57,19 +57,17 @@ public class ClientHandler implements Runnable {
         User existing = em.find(User.class, requestedPhone);
 
         Packet response = new Packet();
-        response.setType(Packet.Type.REGISTER);
 
         if (existing == null) {
             em.getTransaction().begin();
             em.persist(new User(requestedPhone, packet.getName(), packet.getNickname(), packet.getPassword()));
             em.getTransaction().commit();
-
             this.phone = requestedPhone;
             ServerMain.onlineUsers.put(phone, out);
-            response.setStatus("SUCESSO");
+            response.setType(Packet.Type.REGISTER_SUCCESS);
             System.out.println("Usuário registrado: " + phone);
-        } else {
-            response.setStatus("FALHA");
+        } else if (existing!=null){
+            response.setType(Packet.Type.REGISTER_FAIL);
             System.out.println("O registro falhou, você já tem conta no sistema.");
         }
 
@@ -83,17 +81,16 @@ public class ClientHandler implements Runnable {
         User user = em.find(User.class, requestedPhone);
 
         Packet response = new Packet();
-        response.setType(Packet.Type.LOGIN);
 
         if (user != null && user.getPassword().equals(packet.getPassword())) {
             this.phone = requestedPhone;
             ServerMain.onlineUsers.put(phone, out);
-            response.setStatus("SUCESSO");
+            response.setType(Packet.Type.LOGIN_SUCCESS);
 
             deliverPendingMessages();
             notifyPendingReadAcks();
         } else {
-            response.setStatus("FALHA");
+            response.setType(Packet.Type.LOGIN_FAIL);
         }
 
         out.println(ServerMain.gson.toJson(response));

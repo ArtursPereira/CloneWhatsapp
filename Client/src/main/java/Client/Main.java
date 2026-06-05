@@ -62,6 +62,13 @@ public class Main {
 
                         case MESSAGE -> {
                             System.out.println("\n[" + p.getFrom() + "]: " + p.getContent());
+
+                            //adicionado
+                            Packet deliveredAck = new Packet();
+                            deliveredAck.setType(Packet.Type.ACK_DELIVERED);
+                            deliveredAck.setMessageId(p.getMessageId());
+                            out.println(gson.toJson(deliveredAck));
+
                             System.out.println("(pressione Enter para marcar como lida)");
                             pendingAckIds.add(p.getMessageId());
                         }

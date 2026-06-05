@@ -47,6 +47,7 @@ public class ClientHandler implements Runnable {
             case REGISTER        -> handleRegister(packet);
             case LOGIN           -> handleLogin(packet);
             case MESSAGE         -> handleMessage(packet);
+            case ACK_DELIVERED   -> handleAckDelivered(packet); //adicionado
             case ACK_READ        -> handleAckRead(packet);
             case HISTORY_REQUEST -> handleHistoryRequest(packet);
             default -> System.out.println("Tipo desconhecido: " + packet.getType());
@@ -164,13 +165,15 @@ public class ClientHandler implements Runnable {
         PrintWriter receiverOut = ServerMain.onlineUsers.get(packet.getTo());
         if (receiverOut != null) {
             packet.setMessageId(String.valueOf(msg.getId()));
-            packet.setStatus("ENTREGUE");
+            packet.setStatus("ENVIADA"); //mudança de "entregue" para "enviada"
             receiverOut.println(ServerMain.gson.toJson(packet));
 
             if (receiverOut.checkError()) {
                 ServerMain.onlineUsers.remove(packet.getTo());
-                System.out.println("Destinatário desconectado, mensagem ficará como ENVIADA");
+                System.out.println("Destinatário desconectado, mensagem continuará como ENVIADA");
             } else {
+                System.out.println("Mensagem enviada ao socket do destinatário, aguardando ACK_DELIVERED");
+                /*
                 em.getTransaction().begin();
                 msg.setStatus(MessageStatus.ENTREGUE);
                 em.getTransaction().commit();
@@ -180,12 +183,38 @@ public class ClientHandler implements Runnable {
                 ack.setMessageId(String.valueOf(msg.getId()));
                 ack.setStatus("ENTREGUE");
                 out.println(ServerMain.gson.toJson(ack));
+                 */
             }
         } else {
             System.out.println("Destinatário offline, mensagem salva como ENVIADA");
         }
         em.close();
     }
+
+    //adicionado
+    private void handleAckDelivered(Packet packet) {
+        EntityManager em = DatabaseManager.getEntityManager();
+        Message msg = em.find(Message.class, Long.parseLong(packet.getMessageId()));
+
+        if (msg != null && msg.getStatus() == MessageStatus.ENVIADA) {
+            em.getTransaction().begin();
+            msg.setStatus(MessageStatus.ENTREGUE);
+            em.getTransaction().commit();
+
+            PrintWriter senderOut = ServerMain.onlineUsers.get(msg.getSender().getPhone());
+            if (senderOut != null) {
+                Packet ack = new Packet();
+                ack.setType(Packet.Type.ACK_DELIVERED);
+                ack.setMessageId(packet.getMessageId());
+                ack.setStatus("ENTREGUE");
+                senderOut.println(ServerMain.gson.toJson(ack));
+            }
+        }
+
+        em.close();
+    }
+
+
 
     private void handleAckRead(Packet packet) {
         EntityManager em = DatabaseManager.getEntityManager();
@@ -227,13 +256,17 @@ public class ClientHandler implements Runnable {
             p.setTo(msg.getReceiver().getPhone());
             p.setContent(msg.getContent());
             p.setMessageId(String.valueOf(msg.getId()));
-            p.setStatus("ENTREGUE");
+            p.setStatus("ENVIADA"); //mudança de "entregue" para "enviada"
             out.println(ServerMain.gson.toJson(p));
 
+            System.out.println("Mensagem pendente reenviada ao cliente, aguardando ACK_DELIVERED");
+
+            /*
             em.getTransaction().begin();
             Message managed = em.find(Message.class, msg.getId());
             managed.setStatus(MessageStatus.ENTREGUE);
             em.getTransaction().commit();
+             */
         }
         em.close();
     }

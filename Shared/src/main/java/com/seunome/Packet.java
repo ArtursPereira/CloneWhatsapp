@@ -26,6 +26,7 @@ public class Packet {
     private String name;
     private String nickname;
     private String password;
+    private String sessionToken;
 
     public Packet() {}
 
@@ -39,6 +40,9 @@ public class Packet {
     public String getName()      { return name; }
     public String getNickname()  { return nickname; }
     public String getPassword() {return password;}
+    public String getSessionToken() {
+        return sessionToken;
+    }
 
     public void setType(Type type)           { this.type = type; }
     public void setFrom(String from)         { this.from = from; }
@@ -50,4 +54,7 @@ public class Packet {
     public void setName(String name)         { this.name = name; }
     public void setNickname(String nickname) { this.nickname = nickname; }
     public void setPassword(String password) {this.password = password;}
+    public void setSessionToken(String sessionToken) {
+        this.sessionToken = sessionToken;
+    }
 }

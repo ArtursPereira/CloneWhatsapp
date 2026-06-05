@@ -7,15 +7,14 @@ import java.io.*;
 import java.net.Socket;
 import java.util.Queue;
 import java.util.Scanner;
-import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Main {
 
     private static final String HOST = "localhost";
     private static final int PORT = 5000;
     private static final Gson gson = new Gson();
-    private String  LoginorRegister;
 
     public static void main(String[] args) throws Exception {
         Socket socket = new Socket(HOST, PORT);
@@ -23,13 +22,44 @@ public class Main {
         BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
         Scanner scanner = new Scanner(System.in);
         Queue<String> pendingAckIds = new ConcurrentLinkedQueue<>();
+        AtomicBoolean running = new AtomicBoolean(true);
+        AtomicBoolean loggedIn = new AtomicBoolean(false);
+
         new Thread(() -> {
             try {
                 String line;
-                while ((line = in.readLine()) != null) {
+                while (running.get() && (line = in.readLine()) != null) {
                     Packet p = gson.fromJson(line, Packet.class);
-                    //mudança
+
                     switch (p.getType()) {
+                        case LOGIN_SUCCESS -> {
+                            loggedIn.set(true);
+                            System.out.println("Login realizado com sucesso.");
+                        }
+
+                        case LOGIN_FAIL -> {
+                            System.out.println("Login recusado. Usuário já está conectado ou credenciais inválidas.");
+                            running.set(false);
+                            try {
+                                socket.close();
+                            } catch (IOException ignored) {}
+                            return;
+                        }
+
+                        case REGISTER_SUCCESS -> {
+                            loggedIn.set(true);
+                            System.out.println("Registro realizado com sucesso.");
+                        }
+
+                        case REGISTER_FAIL -> {
+                            System.out.println("Registro falhou.");
+                            running.set(false);
+                            try {
+                                socket.close();
+                            } catch (IOException ignored) {}
+                            return;
+                        }
+
                         case MESSAGE -> {
                             System.out.println("\n[" + p.getFrom() + "]: " + p.getContent());
                             System.out.println("(pressione Enter para marcar como lida)");
@@ -47,31 +77,37 @@ public class Main {
                     }
                 }
             } catch (IOException e) {
-                System.out.println("Desconectado do servidor.");
+                if (running.get()) {
+                    System.out.println("Desconectado do servidor.");
+                }
+            } finally {
+                running.set(false);
             }
         }).start();
+
         System.out.println("Digite o comando:");
         System.out.println("LOGIN");
         System.out.println("REGISTER");
         String comando = scanner.nextLine().toUpperCase();
+
         String phone = null;
         Packet packet = new Packet();
+
         switch (comando) {
-
-
-            case "LOGIN" ->{
+            case "LOGIN" -> {
                 System.out.print("Telefone: ");
                 phone = scanner.nextLine();
                 System.out.print("Password: ");
                 String password = scanner.nextLine();
+
                 packet.setType(Packet.Type.LOGIN);
                 packet.setFrom(phone);
                 packet.setPassword(password);
                 out.println(gson.toJson(packet));
             }
+
             case "REGISTER" -> {
                 System.out.print("Telefone: ");
-
                 phone = scanner.nextLine();
                 System.out.print("Nome: ");
                 String name = scanner.nextLine();
@@ -86,16 +122,24 @@ public class Main {
                 packet.setNickname(nickname);
                 packet.setPassword(password);
                 out.println(gson.toJson(packet));
-                }
-                default -> {
-                    System.out.println("Comando inválido.");
-                    return;
-                }
+            }
 
+            default -> {
+                System.out.println("Comando inválido.");
+                socket.close();
+                return;
+            }
         }
-        //Mudança
-        // Loop de envio
-        while (scanner.hasNextLine()) {
+
+        while (running.get() && !loggedIn.get()) {
+            Thread.sleep(100);
+        }
+
+        if (!running.get()) {
+            return;
+        }
+
+        while (running.get() && scanner.hasNextLine()) {
             String pendingId;
             while ((pendingId = pendingAckIds.poll()) != null) {
                 Packet ack = new Packet();
@@ -106,15 +150,17 @@ public class Main {
 
             String input = scanner.nextLine();
 
+            if (!running.get()) {
+                break;
+            }
+
             if (input.startsWith("hist:")) {
-                // verifica hist: ANTES do split genérico
                 String target = input.split(":", 2)[1];
                 Packet hist = new Packet();
                 hist.setType(Packet.Type.HISTORY_REQUEST);
                 hist.setFrom(phone);
                 hist.setTo(target);
                 out.println(gson.toJson(hist));
-
             } else {
                 String[] parts = input.split(":", 2);
                 if (parts.length == 2) {
@@ -129,5 +175,7 @@ public class Main {
                 }
             }
         }
+
+        socket.close();
     }
 }

@@ -8,12 +8,14 @@ import java.io.*;
 import java.net.Socket;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 public class ClientHandler implements Runnable {
 
     private final Socket socket;
     private PrintWriter out;
     private String phone;
+    private String sessionToken;
 
     public ClientHandler(Socket socket) {
         this.socket = socket;
@@ -75,26 +77,77 @@ public class ClientHandler implements Runnable {
         em.close();
     }
 
+    public void invalidateSession() {
+        Packet kickMessage = new Packet();
+        kickMessage.setType(Packet.Type.LOGIN_FAIL);
+        out.println(ServerMain.gson.toJson(kickMessage));
+        out.flush();
+        // Força desconexão
+        try {
+            socket.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
     private void handleLogin(Packet packet) {
         String requestedPhone = packet.getFrom();
         EntityManager em = DatabaseManager.getEntityManager();
-        User user = em.find(User.class, requestedPhone);
-
         Packet response = new Packet();
 
-        if (user != null && user.getPassword().equals(packet.getPassword())) {
-            this.phone = requestedPhone;
-            ServerMain.onlineUsers.put(phone, out);
-            response.setType(Packet.Type.LOGIN_SUCCESS);
+        try {
+            User user = em.find(User.class, requestedPhone);
 
-            deliverPendingMessages();
-            notifyPendingReadAcks();
-        } else {
+            if (user != null && user.getPassword().equals(packet.getPassword())) {
+
+                // Bloqueia se já houver sessão ativa para esse usuário
+                if (ServerMain.onlineUsers.containsKey(requestedPhone)) {
+                    response.setType(Packet.Type.LOGIN_FAIL);
+                    out.println(ServerMain.gson.toJson(response));
+                    closeConnection();
+                    return;
+                }
+
+                // Gera novo token e persiste
+                em.getTransaction().begin();
+                String newSessionToken = UUID.randomUUID().toString();
+                user.setSessionToken(newSessionToken);
+                em.merge(user);
+                em.getTransaction().commit();
+
+                this.phone = requestedPhone;
+                this.sessionToken = newSessionToken;
+                ServerMain.onlineUsers.put(phone, out); // usa o mapa original
+
+                response.setType(Packet.Type.LOGIN_SUCCESS);
+                out.println(ServerMain.gson.toJson(response));
+
+                deliverPendingMessages();
+                notifyPendingReadAcks();
+
+            } else {
+                response.setType(Packet.Type.LOGIN_FAIL);
+                out.println(ServerMain.gson.toJson(response));
+
+            }
+
+        } catch (Exception e) {
+            if (em.getTransaction().isActive()) {
+                em.getTransaction().rollback();
+            }
             response.setType(Packet.Type.LOGIN_FAIL);
+            out.println(ServerMain.gson.toJson(response));
+        } finally {
+            em.close();
         }
+    }
 
-        out.println(ServerMain.gson.toJson(response));
-        em.close();
+    private void closeConnection() {
+        try {
+            socket.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     private void handleMessage(Packet packet) {

@@ -14,6 +14,8 @@ public class ServerMain {
     public static final ConcurrentHashMap<String, PrintWriter> onlineUsers
             = new ConcurrentHashMap<>();
 
+    public static ConcurrentHashMap<String, ClientHandler> onlineHandlers = new ConcurrentHashMap<>();
+
     public static void main(String[] args) throws IOException {
         ExecutorService pool = Executors.newCachedThreadPool();// Verifica se tem alguma thread disponivel, se n tiver cria outra
         ServerSocket serverSocket = new ServerSocket(PORT); // Cria um socket para o client

@@ -19,6 +19,9 @@ public class User {
     @Column(name = "password", nullable = false )
     private String password;
 
+    @Column(name = "session_token")
+    private String sessionToken;
+
 
 
     public User(String phone, String name, String nickname, String password) {
@@ -61,5 +64,13 @@ public class User {
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    public String getSessionToken() {
+        return sessionToken;
+    }
+
+    public void setSessionToken(String sessionToken) {
+        this.sessionToken = sessionToken;
     }
 }

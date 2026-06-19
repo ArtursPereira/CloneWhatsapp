@@ -1,166 +1,82 @@
 package Client;
 
-import com.google.gson.Gson;
 import com.seunome.Packet;
-
-import java.io.*;
-import java.net.Socket;
 import java.util.Queue;
 import java.util.Scanner;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Main {
 
-    private static final String HOST = "localhost";
-    private static final int PORT = 5000;
-    private static final Gson gson = new Gson();
-
     public static void main(String[] args) throws Exception {
-        Socket socket = new Socket(HOST, PORT);
-        PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-        BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
         Scanner scanner = new Scanner(System.in);
         Queue<String> pendingAckIds = new ConcurrentLinkedQueue<>();
-        AtomicBoolean running = new AtomicBoolean(true);
-        AtomicBoolean loggedIn = new AtomicBoolean(false);
 
-        new Thread(() -> {
-            try {
-                String line;
-                while (running.get() && (line = in.readLine()) != null) {
-                    Packet p = gson.fromJson(line, Packet.class);
+        // 1. ConnectionManager recebe um callback para tratar packets recebidos
+        ConnectionManager conn = new ConnectionManager(packet -> {
+            switch (packet.getType()) {
+                case LOGIN_SUCCESS, REGISTER_SUCCESS ->
+                        System.out.println("✅ Autenticado com sucesso.");
 
-                    switch (p.getType()) {
-                        case LOGIN_SUCCESS -> {
-                            loggedIn.set(true);
-                            System.out.println("Login realizado com sucesso.");
-                        }
+                case LOGIN_FAIL ->
+                        System.out.println("❌ Login recusado.");
 
-                        case LOGIN_FAIL -> {
-                            System.out.println("Login recusado. Usuário já está conectado ou credenciais inválidas.");
-                            running.set(false);
-                            try {
-                                socket.close();
-                            } catch (IOException ignored) {}
-                            return;
-                        }
-
-                        case REGISTER_SUCCESS -> {
-                            loggedIn.set(true);
-                            System.out.println("Registro realizado com sucesso.");
-                        }
-
-                        case REGISTER_FAIL -> {
-                            System.out.println("Registro falhou.");
-                            running.set(false);
-                            try {
-                                socket.close();
-                            } catch (IOException ignored) {}
-                            return;
-                        }
-
-                        case MESSAGE -> {
-                            System.out.println("\n[" + p.getFrom() + "]: " + p.getContent());
-                            System.out.println("(pressione Enter para marcar como lida)");
-                            pendingAckIds.add(p.getMessageId());
-                        }
-
-                        case ACK_DELIVERED -> System.out.println("✓ Entregue - mensagem " + p.getMessageId());
-
-                        case ACK_READ -> System.out.println("✓✓ Lida - mensagem " + p.getMessageId());
-
-                        case HISTORY_RESPONSE -> System.out.println("[" + p.getFrom() + " → " + p.getTo() + "]: "
-                                + p.getContent() + " (" + p.getStatus() + ")");
-
-                        default -> System.out.println("Pacote recebido: " + p.getType());
-                    }
+                case MESSAGE -> {
+                    System.out.println("\n[" + packet.getFrom() + "]: " + packet.getContent());
+                    pendingAckIds.add(packet.getMessageId());
                 }
-            } catch (IOException e) {
-                if (running.get()) {
-                    System.out.println("Desconectado do servidor.");
-                }
-            } finally {
-                running.set(false);
+                case ACK_DELIVERED ->
+                        System.out.println("✓ Entregue - msg " + packet.getMessageId());
+
+                case ACK_READ ->
+                        System.out.println("✓✓ Lida - msg " + packet.getMessageId());
+
+                case HISTORY_RESPONSE ->
+                        System.out.println("[" + packet.getFrom() + "→" + packet.getTo() + "]: "
+                                + packet.getContent() + " (" + packet.getStatus() + ")");
+
+                default -> {}
             }
-        }).start();
+        });
 
-        System.out.println("Digite o comando:");
-        System.out.println("LOGIN");
-        System.out.println("REGISTER");
-        String comando = scanner.nextLine().toUpperCase();
+        // 2. Coleta credenciais ANTES de tentar conectar
+        System.out.println("LOGIN ou REGISTER?");
+        String cmd = scanner.nextLine().toUpperCase();
 
-        String phone = null;
-        Packet packet = new Packet();
+        System.out.print("Telefone: "); String phone    = scanner.nextLine();
+        System.out.print("Password: "); String password = scanner.nextLine();
 
-        switch (comando) {
-            case "LOGIN" -> {
-                System.out.print("Telefone: ");
-                phone = scanner.nextLine();
-                System.out.print("Password: ");
-                String password = scanner.nextLine();
+        Packet.Type authType = cmd.equals("REGISTER") ? Packet.Type.REGISTER : Packet.Type.LOGIN;
 
-                packet.setType(Packet.Type.LOGIN);
-                packet.setFrom(phone);
-                packet.setPassword(password);
-                out.println(gson.toJson(packet));
-            }
-
-            case "REGISTER" -> {
-                System.out.print("Telefone: ");
-                phone = scanner.nextLine();
-                System.out.print("Nome: ");
-                String name = scanner.nextLine();
-                System.out.print("Apelido: ");
-                String nickname = scanner.nextLine();
-                System.out.print("Password: ");
-                String password = scanner.nextLine();
-
-                packet.setType(Packet.Type.REGISTER);
-                packet.setFrom(phone);
-                packet.setName(name);
-                packet.setNickname(nickname);
-                packet.setPassword(password);
-                out.println(gson.toJson(packet));
-            }
-
-            default -> {
-                System.out.println("Comando inválido.");
-                socket.close();
-                return;
-            }
+        if (authType == Packet.Type.REGISTER) {
+            // Para registro poderíamos guardar name/nickname também,
+            // mas simplificando aqui para o exemplo
         }
 
-        while (running.get() && !loggedIn.get()) {
-            Thread.sleep(100);
-        }
+        conn.setCredentials(phone, password, authType);
 
-        if (!running.get()) {
-            return;
-        }
+        // 3. Conecta — bloqueia até conseguir (com backoff)
+        conn.connectWithRetry();
 
-        while (running.get() && scanner.hasNextLine()) {
-            String pendingId;
-            while ((pendingId = pendingAckIds.poll()) != null) {
+        // 4. Loop de input do usuário — funciona normalmente
+        while (scanner.hasNextLine()) {
+            // Envia ACKs pendentes
+            String ackId;
+            while ((ackId = pendingAckIds.poll()) != null) {
                 Packet ack = new Packet();
                 ack.setType(Packet.Type.ACK_READ);
-                ack.setMessageId(pendingId);
-                out.println(gson.toJson(ack));
+                ack.setMessageId(ackId);
+                conn.send(ack); // usa o ConnectionManager, não o out direto
             }
 
             String input = scanner.nextLine();
 
-            if (!running.get()) {
-                break;
-            }
-
             if (input.startsWith("hist:")) {
-                String target = input.split(":", 2)[1];
                 Packet hist = new Packet();
                 hist.setType(Packet.Type.HISTORY_REQUEST);
                 hist.setFrom(phone);
-                hist.setTo(target);
-                out.println(gson.toJson(hist));
+                hist.setTo(input.split(":", 2)[1]);
+                conn.send(hist);
+
             } else {
                 String[] parts = input.split(":", 2);
                 if (parts.length == 2) {
@@ -169,13 +85,11 @@ public class Main {
                     msg.setFrom(phone);
                     msg.setTo(parts[0]);
                     msg.setContent(parts[1]);
-                    out.println(gson.toJson(msg));
-                } else {
-                    System.out.println("Formato: telefone:mensagem ou hist:telefone");
+                    conn.send(msg); // ← se offline, enfileira automaticamente
                 }
             }
         }
 
-        socket.close();
+        conn.shutdown();
     }
 }
